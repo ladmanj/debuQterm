@@ -1,12 +1,9 @@
 #include <QApplication>
-#include <stdlib.h> // pro putenv
+#include <stdlib.h>
 #include "MainWindow.h"
 
 int main(int argc, char *argv[])
 {
-    // Fix pro softwarové vykreslování v MSYS2 (pokud stále zlobí)
-    // qputenv("QT_OPENGL", "software");
-
     QApplication a(argc, argv);
 
     MainWindow w;
