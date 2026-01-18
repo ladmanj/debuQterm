@@ -11,6 +11,7 @@ What I was always missing is the combination of VT102 capable terminal with the 
 Now there is **debuQterm** which does it both.
 But ..., on the other side, there is no hex display, macros and such. Your contributions are welcome as well as bug reports and patches of various kinds.
 
+![fastfetch](doc/debuQterm_ff.png)
 ### License
 For no specific reason MIT license was chosen.
 
@@ -23,7 +24,7 @@ For X/Y/Z-modem file transfers you need ```lrzsz``` installed
 Install dependencies according to your system.
  
 ``` 
-sudo apt install libvterm ... 
+sudo apt install libvterm qt6-serialport-dev lrzsz
 ```
 
 Obtaining source code, compiling and installation
