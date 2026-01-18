@@ -34,7 +34,7 @@ mkdir build
 cd build
 qmake6 ../debuQterm
 make
-sudo make install
+cp debuQterm ~/.local/bin/
 ```
 
 ### Origin of the code
