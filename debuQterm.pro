@@ -15,5 +15,5 @@ HEADERS += \
     VTermWidget.h \
 
 RESOURCES += debuQterm.qrc
-
+win32:RC_ICONS += res/debuQterm.ico
 LIBS += -lvterm
