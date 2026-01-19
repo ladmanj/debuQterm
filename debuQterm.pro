@@ -14,4 +14,6 @@ HEADERS += \
     MainWindow.h \
     VTermWidget.h \
 
+RESOURCES += debuQterm.qrc
+
 LIBS += -lvterm
