@@ -352,9 +352,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_transferProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, [this](int, QProcess::ExitStatus){
 
-                m_isTransferring = false;
-                m_terminal->setEnabled(true);
-                m_terminal->setFocus();
+                resetTransferUI();
             });
 
     refreshPorts();
@@ -666,20 +664,31 @@ void MainWindow::setLedState(QLabel *label, bool active)
         label->setStyleSheet("border: 1px solid #555; border-radius: 4px; padding: 2px; color: #555; background-color: #DDD; font-weight: normal;");
     }
 }
+
 void MainWindow::readData()
 {
     QByteArray data = m_serial->readAll();
 
-    if (m_isTransferring && m_transferProcess->state() == QProcess::Running) {
+    if (m_isTransferring && (m_currentProto != ProtoAscii)) {
+        if (m_transferProcess->state() != QProcess::Running) {
+            qWarning() << "RZ process died unexpectedly!";
+            m_isTransferring = false;
+            return;
+        }
 
-	// Forward data to STDIN of 'sz' process
+        if (m_transferProcess->bytesToWrite() > 128 * 1024) {
+            qCritical() << "Buffer overflow protection triggered!";
+            abortTransfer();
+            QMessageBox::critical(this, "Transfer error",
+                                  "External process isn't responding.");
+            return;
+        }
+
         m_transferProcess->write(data);
-
-        return; // Stop, do not send it to the terminal
+        return;
     }
 
     m_terminal->writeInput(data);
-
     if (m_logFile.isOpen()) {
         writeToLog(data);
     }
@@ -817,6 +826,12 @@ QByteArray MainWindow::stripEscapeCodes(const QByteArray &data)
 
 void MainWindow::sendFile()
 {
+    // --- STOP LOGIC ---
+    if (m_isTransferring) {
+        abortTransfer();
+        return;
+    }
+
     if (!m_serial->isOpen()) {
         QMessageBox::warning(this, "Error", "Port not open.");
         return;
@@ -840,6 +855,11 @@ void MainWindow::sendFile()
 
         m_asciiLines = content.split('\n');
         m_asciiTotalLines = m_asciiLines.count();
+
+        m_isTransferring = true;
+
+        m_sendBtn->setText("STOP Sending");
+        m_receiveBtn->setEnabled(false);
 
         // Starting
         statusBar()->showMessage(QString("Sending text: %1 line(s)...").arg(m_asciiTotalLines));
@@ -875,7 +895,7 @@ void MainWindow::sendFile()
 
     arguments << fi.absoluteFilePath();
 
-//    qDebug() << "Launching:" << program << arguments.join(" ");
+    qDebug() << "Launching:" << program << arguments.join(" ");
 
     m_transferProcess->start(program, arguments);
 
@@ -885,6 +905,10 @@ void MainWindow::sendFile()
     }
 
     m_isTransferring = true;
+
+    m_sendBtn->setText("STOP Transfer");
+    m_receiveBtn->setEnabled(false);
+
     QString protoName = (m_currentProto == ProtoZModem) ? "Z-Modem" :
                             (m_currentProto == ProtoYModem) ? "Y-Modem" : "X-Modem";
     statusBar()->showMessage("Sending: " + fi.fileName() + " (" + protoName + ")");
@@ -899,6 +923,12 @@ void MainWindow::onTransferDataFromProcess()
 
 void MainWindow::receiveFile()
 {
+    // --- STOP LOGIC ---
+    if (m_isTransferring) {
+        abortTransfer();
+        return;
+    }
+
     if (!m_serial->isOpen()) {
         QMessageBox::warning(this, "Error", "Port not open.");
         return;
@@ -946,12 +976,16 @@ void MainWindow::receiveFile()
     }
 
     // --- COMMON PART ---
-
+    m_transferProcess->setProcessChannelMode(QProcess::SeparateChannels);
+    m_transferProcess->setReadChannel(QProcess::StandardOutput);
     m_transferProcess->setWorkingDirectory(workingDir);
     m_transferProcess->start(program, arguments);
 
     if (m_transferProcess->waitForStarted()) {
         m_isTransferring = true;
+
+        m_receiveBtn->setText("STOP Transfer");
+        m_sendBtn->setEnabled(false);
 
         QString protoName = (m_currentProto == ProtoZModem) ? "Z-Modem" :
                                 (m_currentProto == ProtoYModem) ? "Y-Modem" : "X-Modem";
@@ -972,6 +1006,7 @@ void MainWindow::sendNextAsciiLine()
     if (m_asciiLines.isEmpty()) {
         m_asciiTimer->stop();
         statusBar()->showMessage("Text transfer finished.", 5000);
+        resetTransferUI();
         return;
     }
 
@@ -987,4 +1022,61 @@ void MainWindow::sendNextAsciiLine()
     int percent = (m_asciiTotalLines > 0) ? (sent * 100 / m_asciiTotalLines) : 100;
 
     statusBar()->showMessage(QString("Sending text: %1% (%2/%3)").arg(percent).arg(sent).arg(m_asciiTotalLines));
+}
+
+void MainWindow::resetTransferUI()
+{
+    m_isTransferring = false;
+
+    switch(m_currentProto){
+    case ProtoZModem:
+        m_sendBtn->setText("Send (Z-Modem)");
+        m_receiveBtn->setText("Receive (Z-Modem)");
+        break;
+    case ProtoYModem:
+        m_sendBtn->setText("Send (Y-Modem)");
+        m_receiveBtn->setText("Receive (Y-Modem)");
+        break;
+    case ProtoXModem:
+        m_sendBtn->setText("Send (X-Modem)");
+        m_receiveBtn->setText("Receive (X-Modem)");
+        break;
+    case ProtoAscii:
+        m_sendBtn->setText("Send (Text)");
+        break;
+    }
+
+    m_sendBtn->setEnabled(true);
+    m_receiveBtn->setEnabled(true);
+
+    m_terminal->setEnabled(true);
+    m_terminal->setFocus();
+}
+
+void MainWindow::abortTransfer()
+{
+    if (m_transferProcess->state() == QProcess::Running) {
+        m_transferProcess->terminate();
+
+        if (!m_transferProcess->waitForFinished(500)) {
+            m_transferProcess->kill();
+        }
+
+        // Send STOP signal to peer
+        // 5x Byte 0x18 (CAN - Cancel) standard abort command for X/Y/Z-Modem
+        if (m_serial->isOpen()) {
+            m_serial->write("\x18\x18\x18\x18\x18\x08\x08\x08\x08\x08");
+        }
+
+    }
+
+    if (m_currentProto == ProtoAscii && m_asciiTimer->isActive()) {
+        m_asciiTimer->stop();
+        m_asciiLines.clear();
+    }
+
+    // Renew buttons
+    resetTransferUI();
+
+    statusBar()->showMessage("Transfer aborted by user.", 5000);
 }

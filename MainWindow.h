@@ -131,8 +131,10 @@ private:
     void sendFile();
     void receiveFile();
     void onTransferDataFromProcess();
+    void abortTransfer();
 
     QByteArray stripEscapeCodes(const QByteArray &data);
+    void resetTransferUI();
 };
 
 #endif // MAINWINDOW_H
