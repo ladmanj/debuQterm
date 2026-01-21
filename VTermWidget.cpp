@@ -1,7 +1,7 @@
 #include "VTermWidget.h"
 #include <QPainter>
 #include <QFontMetrics>
-#include <QDebug>
+//#include <QDebug>
 #include <QResizeEvent>
 #include <QMouseEvent>
 #include <QClipboard>
@@ -369,19 +369,15 @@ void VTermWidget::mousePressEvent(QMouseEvent *event)
         update();
     }
 
+#if defined(Q_OS_WINDOWS)
     else if (event->button() == Qt::RightButton) {
         pasteFromClipboard();
     }
-
+#else
     else if (event->button() == Qt::MiddleButton) {
-        QClipboard *clipboard = QApplication::clipboard();
-
-        if (clipboard->supportsSelection()) {
-            emit dataReadyToSend(clipboard->text(QClipboard::Selection).toUtf8());
-        } else {
             pasteFromClipboard();
-        }
     }
+#endif
 }
 
 void VTermWidget::mouseMoveEvent(QMouseEvent *event)

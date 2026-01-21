@@ -1,7 +1,7 @@
 QT       += core gui widgets serialport
 TARGET = debuQterm
 TEMPLATE = app
-CONFIG += c++17 console
+CONFIG += c++17
 
 DEFINES += QT_DEPRECATED_WARNINGS
 

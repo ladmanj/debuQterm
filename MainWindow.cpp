@@ -1,3 +1,4 @@
+/* MainWindow.cpp*/
 #include "MainWindow.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -225,8 +226,8 @@ MainWindow::MainWindow(QWidget *parent)
     m_rtsCheck->setFocusPolicy(Qt::NoFocus);
     m_dtrCheck->setFocusPolicy(Qt::NoFocus);
 
-    m_rtsCheck->setChecked(true);
-    m_dtrCheck->setChecked(true);
+    m_rtsCheck->setChecked(false);
+    m_dtrCheck->setChecked(false);
 
     ctrlLayout->addWidget(m_rtsCheck);
     ctrlLayout->addWidget(m_dtrCheck);
@@ -343,8 +344,7 @@ MainWindow::MainWindow(QWidget *parent)
         QString msg = QString::fromUtf8(data).trimmed();
 
         if (!msg.isEmpty()) {
-	    // No timeout (0), last text remains displayed until replaced by next one.
-            statusBar()->showMessage(msg);
+            statusBar()->showMessage(msg,5000);
         }
     });
 
@@ -822,9 +822,9 @@ void MainWindow::sendFile()
         return;
     }
 
-    QString fileName = QFileDialog::getOpenFileName(this, "Select text file",
+    QString fileName = QFileDialog::getOpenFileName(this, "Select file",
                                     QDir::homePath(),
-                                    "Text files (*.txt *.conf *.sh);;All (*.*)");
+                                    "All (*.*)");
     if (fileName.isEmpty()) return;
     // --- CLEAN TEXT BRANCH ---
     if (m_currentProto == ProtoAscii) {
@@ -857,17 +857,17 @@ void MainWindow::sendFile()
         // -b = binary
         // -e = escape (safe for serial)
         // -w 2048 = Window size constrained to prevent overflow
-        arguments << "-b" << "-e" << "-vv" << "-w" << "2048";
+        arguments << "--zmodem" << "-b" << "-e" << "-vv" << "-w" << "2048";
         break;
 
     case ProtoYModem:
-        program = "sb";
-        arguments << "-b";
+        program = "sz";
+        arguments << "--ymodem" << "-b" << "-vv";
         break;
 
     case ProtoXModem:
-        program = "sx";
-        arguments << "-b" << "-k";
+        program = "sz";
+        arguments << "--xmodem" << "-b" << "-k" << "-vv";
         break;
     default:
         return;
@@ -875,7 +875,7 @@ void MainWindow::sendFile()
 
     arguments << fi.absoluteFilePath();
 
-    qDebug() << "Launching:" << program << arguments.join(" ");
+//    qDebug() << "Launching:" << program << arguments.join(" ");
 
     m_transferProcess->start(program, arguments);
 
@@ -921,9 +921,9 @@ void MainWindow::receiveFile()
         QFileInfo fi(saveFileName);
         workingDir = fi.absolutePath();
 
-        program = "rx";
+        program = "rz";
         // Arguments: -b (binary), -vv (verbose for statusbar), FILE NAME
-        arguments << "-b" << "-vv" << fi.fileName();
+        arguments << "--xmodem" << "-b" << "-vv" << fi.fileName();
     }
     else {
         // B) Z-Modem / Y-Modem: Folder
@@ -940,8 +940,8 @@ void MainWindow::receiveFile()
             // -E = rename (if exists does file.0, file.1...)
             arguments << "-b" << "-E" << "-vv";
         } else {
-            program = "rb"; // Y-Modem
-            arguments << "-b" << "-vv";
+            program = "rz"; // --ymodem Y-Modem
+            arguments << "--ymodem" << "-b" << "-vv";
         }
     }
 
