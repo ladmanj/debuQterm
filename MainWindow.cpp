@@ -190,6 +190,16 @@ MainWindow::MainWindow(QWidget *parent)
     m_flowCheck->setToolTip("Enable RTS/CTS hardware Flow Control.\n"
                             "Manual control of RTS will be disabled.");
 
+    // scripting
+    qDebug() << "CTOR m_lua address:" << &m_lua;
+
+    m_btnLoadScript = new QPushButton("Script...");
+    connect(m_btnLoadScript, &QPushButton::clicked, this, &MainWindow::onScriptButtonClicked);
+
+    m_scriptCheck = new QCheckBox("Filter");
+    m_scriptCheck->setToolTip("Activate Lua filter");
+
+
     controlsLayout->addWidget(m_portCombo);
 
     controlsLayout->addWidget(m_baudCombo);
@@ -207,6 +217,10 @@ MainWindow::MainWindow(QWidget *parent)
     controlsLayout->addWidget(m_sendBtn);
     controlsLayout->addSpacing(10);
     controlsLayout->addWidget(m_receiveBtn);
+
+    controlsLayout->addSpacing(10);
+    controlsLayout->addWidget(m_btnLoadScript);
+    controlsLayout->addWidget(m_scriptCheck);
 
     mainLayout->addLayout(controlsLayout);
 
@@ -669,6 +683,8 @@ void MainWindow::readData()
 {
     QByteArray data = m_serial->readAll();
 
+    if (data.isEmpty()) return;
+
     if (m_isTransferring && (m_currentProto != ProtoAscii)) {
         if (m_transferProcess->state() != QProcess::Running) {
             qWarning() << "RZ process died unexpectedly!";
@@ -688,16 +704,36 @@ void MainWindow::readData()
         return;
     }
 
-    m_terminal->writeInput(data);
-    if (m_logFile.isOpen()) {
-        writeToLog(data);
+    QByteArray output;
+
+    if (m_scriptCheck->isChecked()) {
+        // --- Pass through LUA ---
+        output = m_lua.processRx(data);
+    }
+    else {
+        output = data;
+    }
+
+    if (!output.isEmpty()) {
+        m_terminal->writeInput(output);
+        if (m_logFile.isOpen()) writeToLog(output);
     }
 }
 
 void MainWindow::writeData(const QByteArray &data)
 {
-    if (m_serial->isOpen()) {
-        m_serial->write(data);
+    if (!m_serial->isOpen()) return;
+
+    QByteArray dataToSend = data;
+
+    // apply outgoing filter
+    if (m_scriptCheck->isChecked()) {
+        // Lua can modify or discard data
+        dataToSend = m_lua.processTx(data);
+    }
+
+    if (!dataToSend.isEmpty()) {
+        m_serial->write(dataToSend);
     }
 }
 
@@ -1079,4 +1115,49 @@ void MainWindow::abortTransfer()
     resetTransferUI();
 
     statusBar()->showMessage("Transfer aborted by user.", 5000);
+}
+
+void MainWindow::onScriptButtonClicked()
+{
+    // 1. ZAPAMATOVAT STAV
+    bool wasConnected = m_serial->isOpen();
+
+    // Pokud port běží, ZAVŘEME HO, aby ho dialog nerozbil
+    if (wasConnected) {
+        qDebug() << "SAFE LOAD: Preventivně zavírám port...";
+        m_serial->close();
+
+        // Změna UI, aby to vypadalo konzistentně (volitelné, pokud máte toggleButton)
+        // ui->actionConnect->setChecked(false);
+    }
+
+    // 2. OTEVŘÍT DIALOG (Teď je to bezpečné, hardware spí)
+    // Můžete klidně vrátit ten nativní dialog, už by neměl vadit.
+    QString fileName = QFileDialog::getOpenFileName(this, "Select Lua Script",
+                                                    QDir::homePath(), "Lua Scripts (*.lua)");
+
+    if (!fileName.isEmpty()) {
+        if (m_lua.loadScript(fileName)) {
+            statusBar()->showMessage("Skript načten: " + QFileInfo(fileName).fileName(), 3000);
+            m_scriptCheck->setChecked(true);
+        } else {
+            QMessageBox::critical(this, "Chyba", m_lua.getLastError());
+        }
+    }
+
+    // 3. OBNOVIT STAV (RESTART)
+    if (wasConnected) {
+        qDebug() << "SAFE LOAD: Obnovuji spojení...";
+
+        // Parametry (Baud, Parita...) v QSerialPort zůstávají nastavené i po close(),
+        // takže stačí jen zavolat open().
+        if (m_serial->open(QIODevice::ReadWrite)) {
+            qDebug() << "SAFE LOAD: Port úspěšně znovu otevřen.";
+
+            // UI Update (pokud je potřeba)
+            // ui->actionConnect->setChecked(true);
+        } else {
+            QMessageBox::critical(this, "Chyba", "Nepodařilo se znovu otevřít port!\n" + m_serial->errorString());
+        }
+    }
 }

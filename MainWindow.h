@@ -18,6 +18,7 @@
 #include <QProcess>
 #include <QMessageBox>
 #include <QFileDialog>
+#include "LuaFilter.h"
 #include "VTermWidget.h"
 
 
@@ -58,6 +59,7 @@ private slots:
     void onRtsToggled(bool checked);
     void onDtrToggled(bool checked);
     void updateStatusLines();
+    void onScriptButtonClicked();
 
 private:
     void loadSettings();
@@ -135,6 +137,12 @@ private:
 
     QByteArray stripEscapeCodes(const QByteArray &data);
     void resetTransferUI();
+
+    LuaFilter m_lua;
+    QCheckBox *m_scriptCheck; // Checkbox "Enable Script"
+    QString m_lastScriptPath;
+
+    QPushButton *m_btnLoadScript;
 };
 
 #endif // MAINWINDOW_H
