@@ -191,13 +191,27 @@ MainWindow::MainWindow(QWidget *parent)
                             "Manual control of RTS will be disabled.");
 
     // scripting
-    qDebug() << "CTOR m_lua address:" << &m_lua;
+    m_luaTimer = new QTimer(this);
+    m_luaTimer->setInterval(100); // 100 ms period
+    connect(m_luaTimer, &QTimer::timeout, this, &MainWindow::onLuaTick);
+    m_luaTimer->start();
+    m_luaStatsTimer.start();
+
+    connect(&m_lua, &LuaFilter::statusMessageRequested, this, [this](QString msg, int timeout){
+        statusBar()->showMessage(msg, timeout);
+    });
+
+    connect(&m_lua, &LuaFilter::terminalLogRequested, this, [this](QByteArray data){
+        m_terminal->writeInput(data);
+    });
 
     m_btnLoadScript = new QPushButton("Script...");
+    m_btnLoadScript->setFocusPolicy(Qt::NoFocus);
     connect(m_btnLoadScript, &QPushButton::clicked, this, &MainWindow::onScriptButtonClicked);
 
     m_scriptCheck = new QCheckBox("Filter");
     m_scriptCheck->setToolTip("Activate Lua filter");
+    m_scriptCheck->setFocusPolicy(Qt::NoFocus);
 
 
     controlsLayout->addWidget(m_portCombo);
@@ -226,6 +240,11 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_terminal = new VTermWidget();
     mainLayout->addWidget(m_terminal, 1);
+
+    // initial size expectation, will be updated soon
+    m_termRows = 24;
+    m_termCols = 80;
+
 
     QHBoxLayout *statusLayout = new QHBoxLayout();
 
@@ -321,26 +340,37 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_terminal, &VTermWidget::terminalSizeChanged, this, [this](int rows, int cols){
         m_sizeBtn->setText(QString("%1x%2").arg(rows).arg(cols));
     m_sizeBtn->setToolTip(QString("Send 'stty rows %1 cols %2; TERM=xterm-256color' to remote").arg(rows).arg(cols));
+
+        m_termRows = rows;
+        m_termCols = cols;
+
+        if (m_scriptCheck->isChecked()) {
+            QByteArray response = m_lua.triggerResize(rows, cols);
+
+            if (!response.isEmpty()) {
+                // If script has anything to say, we put it on the local screen
+                m_terminal->writeInput(response);
+            }
+        }
     });
 
+    connect(m_scriptCheck, &QCheckBox::checkStateChanged, this, [this](){
+        if (m_scriptCheck->isChecked()) {
+            QByteArray response = m_lua.triggerResize(m_termRows, m_termCols);
+
+            if (!response.isEmpty()) {
+                m_terminal->writeInput(response);
+            }
+        }
+
+    });
     connect(m_sizeBtn, &QPushButton::clicked, this, [this](){
         if (!m_serial->isOpen()) return;
 
-	// Aquiring the actual size directly from the button label (format "ROWSxCOLS")
-        QString txt = m_sizeBtn->text();
-        QStringList parts = txt.split('x');
-
-        if (parts.size() == 2) {
-            QString rows = parts[0];
-            QString cols = parts[1];
-
-            // Composing command "stty rows <R> cols <C>; TERM=xterm-256color" + Enter
-            QString cmd = QString("stty rows %1 cols %2; TERM=xterm-256color\r").arg(rows, cols);
-
-            m_serial->write(cmd.toUtf8());
-
-            m_terminal->setFocus();
-        }
+        // Composing command "stty rows <R> cols <C>; TERM=xterm-256color" + Enter
+        QString cmd = QString("stty rows %1 cols %2; TERM=xterm-256color\r").arg(m_termRows).arg(m_termCols);
+        m_serial->write(cmd.toUtf8());
+        m_terminal->setFocus();
     });
 
     // --- FILE TRANSFER PROCESS (SZ / RZ) ---
@@ -394,14 +424,12 @@ void MainWindow::onPortChanged(const QString &portName)
     QSettings settings("Jakub Ladman", "debuQterm");
     QString prefix = "PortSettings/" + portName;
 
-    // 1. Load Baud Rate (Default to 9600 or 115200 if not found)
     int savedBaud = settings.value(prefix + "_Baud", 115200).toInt();
     int baudIdx = m_baudCombo->findData(savedBaud);
     if (baudIdx != -1) {
         m_baudCombo->setCurrentIndex(baudIdx);
     }
 
-    // 2. Load Frame Format (Default to "8N1" if not found)
     QString savedFrame = settings.value(prefix + "_Frame", "8N1").toString();
     int frameIdx = m_frameCombo->findData(savedFrame);
     if (frameIdx != -1) {
@@ -619,7 +647,9 @@ void MainWindow::toggleConnection()
             // Start status lines polling
             m_statusTimer->start();
 
-            m_terminal->writeInput("\r\n--- " + portName.toUtf8() + " Connected ---\r\n");
+            QString msg = QString("\r\n--- " + portName.toUtf8() + " Connected ---\r\n");
+            m_terminal->writeInput(msg.toUtf8());
+            statusBar()->showMessage(msg);
             m_terminal->setFocus();
         } else {
             QMessageBox::critical(this, "Error", "Can't open port:\n" + m_serial->errorString());
@@ -750,8 +780,12 @@ void MainWindow::applyFont()
 
 void MainWindow::startRecording()
 {
+    QSettings settings;
+    QString lastDir = settings.value("logs/lastDir", QDir::homePath()).toString();
+
     QString fileName = QFileDialog::getSaveFileName(this, "Save log as...",
-                                                    QString(), "Log files (*.log *.txt);;All (*.*)");
+                                                    lastDir,
+                                                    "Log files (*.log *.txt);;All (*.*)");
 
     if (fileName.isEmpty()) {
         // Cancelled by user
@@ -759,9 +793,11 @@ void MainWindow::startRecording()
         return;
     }
 
+    settings.setValue("logs/lastDir", QFileInfo(fileName).absolutePath());
+
     m_logFile.setFileName(fileName);
     if (!m_logFile.open(QIODevice::WriteOnly | QIODevice::Append)) {
-        QMessageBox::warning(this, "Chyba", "Nelze otevřít soubor pro zápis.");
+        QMessageBox::warning(this, "Error", "Can't open file for write.");
         m_recBtn->setChecked(false);
         return;
     }
@@ -873,10 +909,16 @@ void MainWindow::sendFile()
         return;
     }
 
+    QSettings settings;
+    QString lastDir = settings.value("files/lastDir", QDir::homePath()).toString();
+
     QString fileName = QFileDialog::getOpenFileName(this, "Select file",
-                                    QDir::homePath(),
+                                    lastDir,
                                     "All (*.*)");
     if (fileName.isEmpty()) return;
+
+    settings.setValue("files/lastDir", QFileInfo(fileName).absolutePath());
+
     // --- CLEAN TEXT BRANCH ---
     if (m_currentProto == ProtoAscii) {
         QFile file(fileName);
@@ -974,15 +1016,20 @@ void MainWindow::receiveFile()
     QStringList arguments;
     QString workingDir;
 
+    QSettings settings;
+    QString lastDir = settings.value("files/lastDir", QDir::homePath()).toString();
+
 
     if (m_currentProto == ProtoXModem) {
         // A) X-Modem: File name needed in advance
         QString saveFileName = QFileDialog::getSaveFileName(this,
                                                             "Save incoming X-Modem file as...",
-                                                            QDir::homePath(),
+                                                            lastDir,
                                                             "All files (*.*)");
 
         if (saveFileName.isEmpty()) return;
+
+        settings.setValue("files/lastDir", QFileInfo(saveFileName).absolutePath());
 
         QFileInfo fi(saveFileName);
         workingDir = fi.absolutePath();
@@ -995,10 +1042,11 @@ void MainWindow::receiveFile()
         // B) Z-Modem / Y-Modem: Folder
         QString saveDir = QFileDialog::getExistingDirectory(this,
                                                             "Select folder for incoming files",
-                                                            QDir::homePath());
+                                                            lastDir);
 
         if (saveDir.isEmpty()) return;
 
+        settings.setValue("files/lastDir", QFileInfo(saveDir).absolutePath());
         workingDir = saveDir;
 
         if (m_currentProto == ProtoZModem) {
@@ -1010,6 +1058,8 @@ void MainWindow::receiveFile()
             arguments << "--ymodem" << "-b" << "-vv";
         }
     }
+
+
 
     // --- COMMON PART ---
     m_transferProcess->setProcessChannelMode(QProcess::SeparateChannels);
@@ -1119,45 +1169,48 @@ void MainWindow::abortTransfer()
 
 void MainWindow::onScriptButtonClicked()
 {
-    // 1. ZAPAMATOVAT STAV
-    bool wasConnected = m_serial->isOpen();
+    QSettings settings;
+    QString lastDir = settings.value("scripts/lastDir", QDir::homePath()).toString();
 
-    // Pokud port běží, ZAVŘEME HO, aby ho dialog nerozbil
-    if (wasConnected) {
-        qDebug() << "SAFE LOAD: Preventivně zavírám port...";
-        m_serial->close();
-
-        // Změna UI, aby to vypadalo konzistentně (volitelné, pokud máte toggleButton)
-        // ui->actionConnect->setChecked(false);
-    }
-
-    // 2. OTEVŘÍT DIALOG (Teď je to bezpečné, hardware spí)
-    // Můžete klidně vrátit ten nativní dialog, už by neměl vadit.
     QString fileName = QFileDialog::getOpenFileName(this, "Select Lua Script",
-                                                    QDir::homePath(), "Lua Scripts (*.lua)");
+                                                    lastDir, "Lua Scripts (*.lua)");
 
-    if (!fileName.isEmpty()) {
-        if (m_lua.loadScript(fileName)) {
-            statusBar()->showMessage("Skript načten: " + QFileInfo(fileName).fileName(), 3000);
-            m_scriptCheck->setChecked(true);
-        } else {
-            QMessageBox::critical(this, "Chyba", m_lua.getLastError());
-        }
+    if (fileName.isEmpty()) {
+        m_terminal->setFocus();
+        return;
     }
 
-    // 3. OBNOVIT STAV (RESTART)
-    if (wasConnected) {
-        qDebug() << "SAFE LOAD: Obnovuji spojení...";
+    settings.setValue("scripts/lastDir", QFileInfo(fileName).absolutePath());
 
-        // Parametry (Baud, Parita...) v QSerialPort zůstávají nastavené i po close(),
-        // takže stačí jen zavolat open().
-        if (m_serial->open(QIODevice::ReadWrite)) {
-            qDebug() << "SAFE LOAD: Port úspěšně znovu otevřen.";
+    if (m_lua.loadScript(fileName)) {
+        statusBar()->showMessage("Script loaded: " + QFileInfo(fileName).fileName(), 3000);
+        m_scriptCheck->setChecked(true);
+        m_lua.setGlobalInt("TERM_ROWS", m_termRows);
+        m_lua.setGlobalInt("TERM_COLS", m_termCols);
+    } else {
+        QMessageBox::critical(this, "Error", m_lua.getLastError());
+    }
 
-            // UI Update (pokud je potřeba)
-            // ui->actionConnect->setChecked(true);
-        } else {
-            QMessageBox::critical(this, "Chyba", "Nepodařilo se znovu otevřít port!\n" + m_serial->errorString());
+    if (m_serial->isOpen() && m_serial->bytesAvailable() > 0) {
+        readData();
+    }
+}
+
+
+void MainWindow::onLuaTick()
+{
+    qint64 realDelta = m_luaStatsTimer.restart();
+    if (realDelta > 1000) realDelta = 1000;
+
+    if (m_scriptCheck->isChecked()) {
+
+        QByteArray dataToSend = m_lua.triggerTick((int)realDelta);
+
+        if (!dataToSend.isEmpty()) {
+
+            if (m_serial->isOpen()) {
+                m_serial->write(dataToSend);
+            }
         }
     }
 }

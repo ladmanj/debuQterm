@@ -228,7 +228,7 @@ void VTermWidget::keyPressEvent(QKeyEvent *event)
     VTermModifier mod = mapQtModifiers(event->modifiers());
     VTermKey key = mapQtKeyToVTerm(event->key());
 
-    // 1. Special keys (Šipky, F1-F12, Enter...)
+    // 1. Special keys (Arrows, F1-F12, Enter...)
     // libvterm, handles it okay
     if (key != VTERM_KEY_NONE) {
         vterm_keyboard_key(m_vterm, key, mod);

@@ -1,40 +1,38 @@
 #ifndef LUAFILTER_H
 #define LUAFILTER_H
 
+#include <QObject>
 #include <QString>
 #include <QByteArray>
-
 #include "lua.hpp"
-/*
-extern "C" {
-#include "lua.h"
-#include "lualib.h"
-#include "lauxlib.h"
-}
-*/
 
-class LuaFilter
+class LuaFilter : public QObject
 {
+    Q_OBJECT
+
 public:
-    LuaFilter();
+    explicit LuaFilter(QObject *parent = nullptr);
     ~LuaFilter();
 
+    void reset();
     bool loadScript(const QString &filePath);
     QString getLastError() const { return m_lastError; }
 
-    // --- ZMĚNA API ---
-
-    // Zpracuje příchozí data (Serial -> Terminal)
-    // Hledá v Lua funkci: rx(data)
-    // Pokud funkce neexistuje, vrátí data převedená na string (pass-through).
     QByteArray processRx(const QByteArray &inputData);
-
-    // Zpracuje odchozí data (Terminal -> Serial)
-    // Hledá v Lua funkci: tx(data)
-    // Pokud funkce neexistuje, vrátí data nezměněná.
     QByteArray processTx(const QByteArray &inputData);
+    QByteArray triggerResize(int rows, int cols);
+    QByteArray triggerTick(int deltaMs);
+
+    void setGlobalInt(const QString &name, int value);
+
+signals:
+    void statusMessageRequested(QString msg, int timeout);
+    void terminalLogRequested(QByteArray data);
 
 private:
+    void initLua();
+    void closeLua();
+
     lua_State *L = nullptr;
     QString m_lastError;
     bool m_scriptLoaded = false;

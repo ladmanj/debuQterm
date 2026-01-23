@@ -20,7 +20,7 @@
 #include <QFileDialog>
 #include "LuaFilter.h"
 #include "VTermWidget.h"
-
+#include <QElapsedTimer>
 
 // PortComboBox - ComboBox wich sends signal when pop-pup
 class PortComboBox : public QComboBox
@@ -60,6 +60,7 @@ private slots:
     void onDtrToggled(bool checked);
     void updateStatusLines();
     void onScriptButtonClicked();
+    void onLuaTick();
 
 private:
     void loadSettings();
@@ -77,6 +78,9 @@ private:
 
     QFontComboBox *m_fontCombo;
     QPushButton *m_sizeBtn;
+
+    int m_termRows;
+    int m_termCols;
 
     void applyFont();
 
@@ -143,6 +147,8 @@ private:
     QString m_lastScriptPath;
 
     QPushButton *m_btnLoadScript;
+    QTimer *m_luaTimer;
+    QElapsedTimer m_luaStatsTimer;
 };
 
 #endif // MAINWINDOW_H
