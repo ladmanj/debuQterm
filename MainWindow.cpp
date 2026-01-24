@@ -44,7 +44,7 @@ MainWindow::MainWindow(QWidget *parent)
     // 7-bit configurations (Vintage/ASCII)
     m_frameCombo->addItem("7E1 (7bit Even 1stop)", "7E1");
     m_frameCombo->addItem("7O1 (7bit Odd  1stop)",  "7O1");
-    m_frameCombo->addItem("7O1 (7bit None 1stop)",  "7N1");
+    m_frameCombo->addItem("7N1 (7bit None 1stop)",  "7N1");
     m_frameCombo->addItem("7N2 (Teletype)",  "7N2");
 
     // 8-bit variations (Industrial/Slow)
