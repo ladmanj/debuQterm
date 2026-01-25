@@ -22,9 +22,9 @@ For X/Y/Z-modem file transfers you need ```lrzsz``` installed
 
 ### Building and installation
 Install dependencies according to your system.
- 
 ``` 
-sudo apt install libvterm qt6-serialport-dev lrzsz
+sudo apt update
+sudo apt install build-essential qt6-base-dev libqt6serialport6-dev libvterm-dev lrzsz
 ```
 
 Obtaining source code, compiling and installation
@@ -33,9 +33,13 @@ git clone https://github.com/ladmanj/debuQterm.git
 mkdir build
 cd build
 qmake6 ../debuQterm
-make
+make -j$(nproc)
 cp debuQterm ~/.local/bin/
 ```
+#### Windows
+Package installer is available in releases section.
+### Scripting
+debuQterm contains Lua virtual machine to enable automatic data filtering/analysis. See [scripting](Scripting.md).
 
 ### Origin of the code
 
