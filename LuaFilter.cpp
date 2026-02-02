@@ -38,11 +38,80 @@ static int l_print_log(lua_State *L) {
     }
     return 0;
 }
+
+// Wrapper pro set_rts(bool)
+static int l_set_rts(lua_State *L) {
+    LuaFilter* self = (LuaFilter*)lua_touserdata(L, lua_upvalueindex(1));
+    if (self) {
+        bool enable = lua_toboolean(L, 1);
+        emit self->setRtsRequested(enable);
+    }
+    return 0;
+}
+
+// Wrapper pro set_dtr(bool)
+static int l_set_dtr(lua_State *L) {
+    LuaFilter* self = (LuaFilter*)lua_touserdata(L, lua_upvalueindex(1));
+    if (self) {
+        bool enable = lua_toboolean(L, 1);
+        emit self->setDtrRequested(enable);
+    }
+    return 0;
+}
+
+// Wrapper pro get_lines() -> vrací tabulku
+static int l_get_lines(lua_State *L) {
+    LuaFilter* self = (LuaFilter*)lua_touserdata(L, lua_upvalueindex(1));
+    if (self) {
+        QVariantMap lines = self->getLastLines();
+
+        lua_newtable(L);
+        QMapIterator<QString, QVariant> i(lines);
+        while (i.hasNext()) {
+            i.next();
+            lua_pushstring(L, i.key().toUtf8().constData());
+            lua_pushboolean(L, i.value().toBool());
+            lua_settable(L, -3);
+        }
+        return 1; // Vracíme tabulku
+    }
+    return 0;
+}
 // ------------------------------------------------------------
 
 LuaFilter::LuaFilter(QObject *parent) : QObject(parent)
 {
     initLua();
+}
+
+void LuaFilter::registerFunctions()
+{
+    if (!L) return;
+
+    // 1. print_status
+    lua_pushlightuserdata(L, this);
+    lua_pushcclosure(L, l_print_status, 1);
+    lua_setglobal(L, "print_status");
+
+    // 2. print_log
+    lua_pushlightuserdata(L, this);
+    lua_pushcclosure(L, l_print_log, 1);
+    lua_setglobal(L, "print_log");
+
+    // 3. set_rts
+    lua_pushlightuserdata(L, this);
+    lua_pushcclosure(L, l_set_rts, 1);
+    lua_setglobal(L, "set_rts");
+
+    // 4. set_dtr
+    lua_pushlightuserdata(L, this);
+    lua_pushcclosure(L, l_set_dtr, 1);
+    lua_setglobal(L, "set_dtr");
+
+    // 5. get_lines
+    lua_pushlightuserdata(L, this);
+    lua_pushcclosure(L, l_get_lines, 1);
+    lua_setglobal(L, "get_lines");
 }
 
 void LuaFilter::initLua()
@@ -72,17 +141,19 @@ void LuaFilter::initLua()
         lua_pop(L, 1);  /* module copy discard */
     }
 
-    // 1. print_status
-    lua_pushlightuserdata(L, this);        // Pushing 'this' on stack
-    lua_pushcclosure(L, l_print_status, 1); // Creating a function with 1 "secret" variable (upvalue)
-    lua_setglobal(L, "print_status");      // giving it name in lua
+    // // 1. print_status
+    // lua_pushlightuserdata(L, this);        // Pushing 'this' on stack
+    // lua_pushcclosure(L, l_print_status, 1); // Creating a function with 1 "secret" variable (upvalue)
+    // lua_setglobal(L, "print_status");      // giving it name in lua
 
-    // 2. print_log
-    lua_pushlightuserdata(L, this);
-    lua_pushcclosure(L, l_print_log, 1);
-    lua_setglobal(L, "print_log");
+    // // 2. print_log
+    // lua_pushlightuserdata(L, this);
+    // lua_pushcclosure(L, l_print_log, 1);
+    // lua_setglobal(L, "print_log");
 
-    qDebug() << "Lua Filter initialized (API Extended)";}
+    registerFunctions();
+    qDebug() << "Lua Filter initialized (API Extended)";
+}
 
 LuaFilter::~LuaFilter()
 {
@@ -281,4 +352,42 @@ QByteArray LuaFilter::triggerTick(int deltaMs)
 
     lua_pop(L, 1);
     return result;
+}
+
+void LuaFilter::updateSerialLines(const QVariantMap &lines)
+{
+    // Pokud Lua neběží nebo není skript, jen aktualizujeme cache a končíme
+    if (!L || !m_scriptLoaded) {
+        m_lastLinesCache = lines;
+        return;
+    }
+
+    // Pokud se nic nezměnilo, končíme (optimalizace)
+    if (lines == m_lastLinesCache) return;
+
+    m_lastLinesCache = lines; // Aktualizace cache
+
+    // Hledáme funkci on_stat_line_change
+    lua_getglobal(L, "on_stat_line_change");
+
+    if (lua_isfunction(L, -1)) {
+        // Vytvoříme Lua tabulku z QVariantMap
+        lua_newtable(L);
+        QMapIterator<QString, QVariant> i(lines);
+        while (i.hasNext()) {
+            i.next();
+            lua_pushstring(L, i.key().toUtf8().constData());
+            lua_pushboolean(L, i.value().toBool());
+            lua_settable(L, -3);
+        }
+
+        // Volání: on_stat_line_change(table)
+        if (lua_pcall(L, 1, 0, 0) != LUA_OK) {
+            const char* error = lua_tostring(L, -1);
+            emit terminalLogRequested(QString("Lua Error (on_stat_line_change): %1\n").arg(error).toUtf8());
+            lua_pop(L, 1);
+        }
+    } else {
+        lua_pop(L, 1); // Funkce neexistuje, clean stack
+    }
 }

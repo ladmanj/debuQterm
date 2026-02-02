@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QString>
 #include <QByteArray>
+#include <QVariantMap>
 #include "lua.hpp"
 
 class LuaFilter : public QObject
@@ -25,17 +26,23 @@ public:
 
     void setGlobalInt(const QString &name, int value);
 
+    void updateSerialLines(const QVariantMap &lines); // Volá MainWindow
+    QVariantMap getLastLines() const { return m_lastLinesCache; } // Pro get_lines()
 signals:
     void statusMessageRequested(QString msg, int timeout);
     void terminalLogRequested(QByteArray data);
+    void setRtsRequested(bool enable);
+    void setDtrRequested(bool enable);
 
 private:
     void initLua();
     void closeLua();
+    void registerFunctions();
 
     lua_State *L = nullptr;
     QString m_lastError;
     bool m_scriptLoaded = false;
+    QVariantMap m_lastLinesCache;
 };
 
 #endif // LUAFILTER_H

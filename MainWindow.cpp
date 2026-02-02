@@ -206,6 +206,36 @@ MainWindow::MainWindow(QWidget *parent)
         m_terminal->writeInput(data);
     });
 
+    // connect(&m_lua, &LuaFilter::setRtsRequested, m_serial, &QSerialPort::setRequestToSend);
+    // connect(&m_lua, &LuaFilter::setDtrRequested, m_serial, &QSerialPort::setDataTerminalReady);
+    // --- RTS PROPOJENÍ (LUA -> HW + GUI) ---
+    connect(&m_lua, &LuaFilter::setRtsRequested, this, [this](bool enable){
+        // 1. Nastavíme hardware
+        if(m_serial->isOpen()) {
+            m_serial->setRequestToSend(enable);
+        }
+
+        // 2. Aktualizujeme CheckBox (předpokládám název m_rtsCheckBox nebo ui->rtsCheckBox)
+        // Použijeme QSignalBlocker, aby změna stavu checkboxu nevyvolala znovu odeslání do HW (pokud to tam máte napojené)
+        {
+            const QSignalBlocker blocker(m_rtsCheck);
+            m_rtsCheck->setChecked(enable);
+        }
+    });
+
+    // --- DTR PROPOJENÍ (LUA -> HW + GUI) ---
+    connect(&m_lua, &LuaFilter::setDtrRequested, this, [this](bool enable){
+        // 1. Nastavíme hardware
+        if(m_serial->isOpen()) {
+            m_serial->setDataTerminalReady(enable);
+        }
+
+        // 2. Aktualizujeme CheckBox
+        {
+            const QSignalBlocker blocker(m_dtrCheck);
+            m_dtrCheck->setChecked(enable);
+        }
+    });
     m_btnLoadScript = new QPushButton("Script...");
     m_btnLoadScript->setFocusPolicy(Qt::NoFocus);
     connect(m_btnLoadScript, &QPushButton::clicked, this, &MainWindow::onScriptButtonClicked);
@@ -679,17 +709,32 @@ void MainWindow::updateStatusLines()
 
     QSerialPort::PinoutSignals sigs = m_serial->pinoutSignals();
 
-    // CTS (Clear To Send)
-    setLedState(m_ctsLabel, sigs & QSerialPort::ClearToSendSignal);
+    // 1. LEDs
+    bool cts = sigs & QSerialPort::ClearToSendSignal;
+    bool dsr = sigs & QSerialPort::DataSetReadySignal;
+    bool dcd = sigs & QSerialPort::DataCarrierDetectSignal;
+    bool ri  = sigs & QSerialPort::RingIndicatorSignal;
 
-    // DSR (Data Set Ready)
-    setLedState(m_dsrLabel, sigs & QSerialPort::DataSetReadySignal);
+    setLedState(m_ctsLabel, cts);
+    setLedState(m_dsrLabel, dsr);
+    setLedState(m_dcdLabel, dcd);
+    setLedState(m_riLabel, ri);
 
-    // DCD (Data Carrier Detect)
-    setLedState(m_dcdLabel, sigs & QSerialPort::DataCarrierDetectSignal);
+    // 2. INPUTS for complete information
+    bool rts = m_serial->isRequestToSend();
+    bool dtr = m_serial->isDataTerminalReady();
 
-    // RI (Ring Indicator)
-    setLedState(m_riLabel, sigs & QSerialPort::RingIndicatorSignal);
+    // 3. Sending to lua
+
+    QVariantMap statusMap;
+    statusMap["cts"] = cts;
+    statusMap["dsr"] = dsr;
+    statusMap["dcd"] = dcd;
+    statusMap["ri"]  = ri;
+    statusMap["rts"] = rts;
+    statusMap["dtr"] = dtr;
+
+    m_lua.updateSerialLines(statusMap);
 }
 
 QLabel* MainWindow::createLedLabel(const QString &text)
