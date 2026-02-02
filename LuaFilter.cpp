@@ -1,4 +1,5 @@
 #include "LuaFilter.h"
+#include "qkeysequence.h"
 #include <QDebug>
 #include <QFileInfo>
 #include <QCoreApplication>
@@ -77,6 +78,20 @@ static int l_get_lines(lua_State *L) {
     }
     return 0;
 }
+
+// Wrapper pro přímé odeslání dat (pro makra)
+static int l_send_raw(lua_State *L) {
+    LuaFilter* self = (LuaFilter*)lua_touserdata(L, lua_upvalueindex(1));
+
+    size_t len;
+    const char* data = lua_tolstring(L, 1, &len);
+
+    if (self && data) {
+        // Emitujeme signál, který v MainWindow rovnou zapíše do portu
+        emit self->sendRawRequested(QByteArray(data, len));
+    }
+    return 0;
+}
 // ------------------------------------------------------------
 
 LuaFilter::LuaFilter(QObject *parent) : QObject(parent)
@@ -112,6 +127,11 @@ void LuaFilter::registerFunctions()
     lua_pushlightuserdata(L, this);
     lua_pushcclosure(L, l_get_lines, 1);
     lua_setglobal(L, "get_lines");
+
+    // 6. send_raw
+    lua_pushlightuserdata(L, this);
+    lua_pushcclosure(L, l_send_raw, 1);
+    lua_setglobal(L, "send_raw");
 }
 
 void LuaFilter::initLua()
@@ -390,4 +410,54 @@ void LuaFilter::updateSerialLines(const QVariantMap &lines)
     } else {
         lua_pop(L, 1); // Funkce neexistuje, clean stack
     }
+}
+
+bool LuaFilter::processKeyPress(int key, int modifiers)
+{
+    // OPTIMALIZACE: Pokud Lua neběží, okamžitý návrat = NULOVÉ ZPOŽDĚNÍ
+    if (!L || !m_scriptLoaded) return false;
+
+    // Rychlý check, jestli funkce v Lua vůbec existuje
+    lua_getglobal(L, "on_key_down");
+    if (!lua_isfunction(L, -1)) {
+        lua_pop(L, 1);
+        return false;
+    }
+
+    // Převedeme klávesu na string (např. "F1", "A", "Enter")
+    QString keyName;
+    if (key >= Qt::Key_F1 && key <= Qt::Key_F35) {
+        keyName = QString("F%1").arg(key - Qt::Key_F1 + 1);
+    } else if (key == Qt::Key_Return || key == Qt::Key_Enter) {
+        keyName = "Enter";
+    } else if (key == Qt::Key_Space) {
+        keyName = "Space";
+    } else {
+        // Zkusíme standardní znak, pokud je tisknutelný
+        QKeySequence seq(key);
+        keyName = seq.toString();
+    }
+
+    // Argument 1: Jméno klávesy
+    lua_pushstring(L, keyName.toUtf8().constData());
+
+    // Argument 2: Modifikátory (bool flagy v tabulce jsou hezčí než int)
+    lua_newtable(L);
+    lua_pushboolean(L, modifiers & Qt::ShiftModifier);   lua_setfield(L, -2, "shift");
+    lua_pushboolean(L, modifiers & Qt::ControlModifier); lua_setfield(L, -2, "ctrl");
+    lua_pushboolean(L, modifiers & Qt::AltModifier);     lua_setfield(L, -2, "alt");
+
+    // Voláme Lua: handled = on_key_down("F1", {shift=false, ...})
+    if (lua_pcall(L, 2, 1, 0) != LUA_OK) {
+        QString err = QString::fromUtf8(lua_tostring(L, -1));
+        lua_pop(L, 1);
+        emit terminalLogRequested("[LUA KEY ERROR: " + err.toUtf8() + "]\n");
+        return false;
+    }
+
+    // Výsledek: true = klávesu jsme zpracovali (neposílat dál), false = nic
+    bool handled = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+
+    return handled;
 }

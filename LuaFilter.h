@@ -28,11 +28,13 @@ public:
 
     void updateSerialLines(const QVariantMap &lines); // Volá MainWindow
     QVariantMap getLastLines() const { return m_lastLinesCache; } // Pro get_lines()
+    bool processKeyPress(int key, int modifiers);
 signals:
     void statusMessageRequested(QString msg, int timeout);
     void terminalLogRequested(QByteArray data);
     void setRtsRequested(bool enable);
     void setDtrRequested(bool enable);
+    void sendRawRequested(QByteArray data);
 
 private:
     void initLua();

@@ -236,6 +236,13 @@ MainWindow::MainWindow(QWidget *parent)
             m_dtrCheck->setChecked(enable);
         }
     });
+
+    connect(&m_lua, &LuaFilter::sendRawRequested, this, [this](QByteArray data){
+        if (m_serial->isOpen()) {
+            m_serial->write(data); // Píšeme přímo, obcházíme logiku terminálu
+        }
+    });
+
     m_btnLoadScript = new QPushButton("Script...");
     m_btnLoadScript->setFocusPolicy(Qt::NoFocus);
     connect(m_btnLoadScript, &QPushButton::clicked, this, &MainWindow::onScriptButtonClicked);
@@ -270,6 +277,7 @@ MainWindow::MainWindow(QWidget *parent)
     mainLayout->addLayout(controlsLayout);
 
     m_terminal = new VTermWidget();
+    m_terminal->installEventFilter(this);
     mainLayout->addWidget(m_terminal, 1);
 
     // initial size expectation, will be updated soon
@@ -446,6 +454,23 @@ void MainWindow::closeEvent(QCloseEvent *event)
 {
     saveSettings();
     QMainWindow::closeEvent(event);
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    // Zajímá nás jen terminál a jen stisk klávesy
+    if (watched == m_terminal && event->type() == QEvent::KeyPress) {
+        QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
+
+        // Zeptáme se LuaFilteru, jestli chce klávesu "sežrat"
+        // Předáme kód klávesy (Qt::Key) a modifikátory (Ctrl, Shift...)
+        if (m_lua.processKeyPress(keyEvent->key(), keyEvent->modifiers())) {
+            return true; // Lua řekla ANO -> klávesu jsme zpracovali, nepouštíme ji dál
+        }
+    }
+
+    // Jinak pokračujeme standardně (znak se napíše do terminálu)
+    return QMainWindow::eventFilter(watched, event);
 }
 
 void MainWindow::onPortChanged(const QString &portName)
