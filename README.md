@@ -9,7 +9,7 @@ There are many terminal emulation programs such as putty, mintty, KDE Konsole, W
 What I was always missing is the combination of VT102 capable terminal with the hardware debugging features.
 
 Now there is **debuQterm** which does it both.
-But ..., on the other side, there is no hex display, macros and such. Your contributions are welcome as well as bug reports and patches of various kinds.
+~~But ..., on the other side, there is no hex display, macros and such.~~ You can use Lua scripting to display data in hex (see attached scripts) or any other format. Your contributions are welcome as well as bug reports and patches of various kinds.
 
 ![fastfetch](doc/debuQterm_ff.png)
 ### License
