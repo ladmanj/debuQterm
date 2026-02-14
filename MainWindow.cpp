@@ -34,6 +34,8 @@ MainWindow::MainWindow(QWidget *parent)
     m_portCombo->setMaxVisibleItems(15);
 
     m_baudCombo = new QComboBox();
+    m_baudCombo->setEditable(true);
+    m_baudCombo->setValidator(new QIntValidator(50, 4000000, this));
 
     // Frame selection (Data Bits / Parity / Stop Bits)
     m_frameCombo = new QComboBox();
@@ -481,10 +483,11 @@ void MainWindow::onPortChanged(const QString &portName)
     QString prefix = "PortSettings/" + portName;
 
     int savedBaud = settings.value(prefix + "_Baud", 115200).toInt();
-    int baudIdx = m_baudCombo->findData(savedBaud);
-    if (baudIdx != -1) {
-        m_baudCombo->setCurrentIndex(baudIdx);
-    }
+    // int baudIdx = m_baudCombo->findData(savedBaud);
+    // if (baudIdx != -1) {
+    //     m_baudCombo->setCurrentIndex(baudIdx);
+    // }
+    m_baudCombo->setCurrentText(QString::number(savedBaud));
 
     QString savedFrame = settings.value(prefix + "_Frame", "8N1").toString();
     int frameIdx = m_frameCombo->findData(savedFrame);
@@ -520,7 +523,8 @@ void MainWindow::saveSettings()
         QString prefix = "PortSettings/" + currentPort;
 
         // Save Baud Rate
-        settings.setValue(prefix + "_Baud", m_baudCombo->currentData().toInt());
+        //settings.setValue(prefix + "_Baud", m_baudCombo->currentData().toInt());
+        settings.setValue(prefix + "_Baud", m_baudCombo->currentText().toInt());
 
         // Save Frame Format (e.g., "8N1", "7E1")
         settings.setValue(prefix + "_Frame", m_frameCombo->currentData().toString());
@@ -653,7 +657,12 @@ void MainWindow::toggleConnection()
         if (portName.isEmpty()) return;
 
         m_serial->setPortName(portName);
-        m_serial->setBaudRate(m_baudCombo->currentData().toInt());
+//        m_serial->setBaudRate(m_baudCombo->currentData().toInt());
+
+        bool ok;
+        qint32 baud = m_baudCombo->currentText().toInt(&ok);
+        if (!ok) baud = 115200; // Fallback pro jistotu
+        m_serial->setBaudRate(baud);
 
         // Parse Frame Format (Data/Parity/Stop)
         QString code = m_frameCombo->currentData().toString();
